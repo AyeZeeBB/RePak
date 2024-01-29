@@ -2,6 +2,40 @@
 #include "assets.h"
 #include "public/material.h"
 
+std::map<int, D3D11_BLEND> D3D11_BLEND_NAMES =
+{
+    {1, D3D11_BLEND_ZERO},
+    {2, D3D11_BLEND_ONE},
+    {3, D3D11_BLEND_SRC_COLOR},
+    {4, D3D11_BLEND_INV_SRC_COLOR},
+    {5, D3D11_BLEND_SRC_ALPHA},
+    {6, D3D11_BLEND_INV_SRC_ALPHA},
+    {7, D3D11_BLEND_DEST_ALPHA},
+    {8, D3D11_BLEND_INV_DEST_ALPHA},
+    {9, D3D11_BLEND_DEST_COLOR},
+    {10, D3D11_BLEND_INV_DEST_COLOR},
+    {11, D3D11_BLEND_SRC_ALPHA_SAT},
+    {14, D3D11_BLEND_BLEND_FACTOR},
+    {15, D3D11_BLEND_INV_BLEND_FACTOR},
+    {16, D3D11_BLEND_SRC1_COLOR},
+    {17, D3D11_BLEND_INV_SRC1_COLOR},
+    {18, D3D11_BLEND_SRC1_ALPHA},
+    {19, D3D11_BLEND_INV_SRC1_ALPHA}
+};
+
+
+std::map<int, D3D11_BLEND_OP> D3D11_BLEND_OP_NAMES =
+{
+    {1, D3D11_BLEND_OP_ADD},
+    {2, D3D11_BLEND_OP_SUBTRACT},
+    {3, D3D11_BLEND_OP_REV_SUBTRACT},
+    {4, D3D11_BLEND_OP_MIN},
+    {5, D3D11_BLEND_OP_MAX}
+};
+
+const int NUM_BLEND_STATES = 8;
+const int BITS_PER_BLEND_STATE = 5;
+
 #undef GetObject
 // we need to take better account of textures once asset caching becomes a thing
 void Material_CreateTextures(CPakFile* pak, std::vector<PakAsset_t>* assetEntries, rapidjson::Value& mapEntry)
@@ -81,9 +115,57 @@ void MaterialAsset_t::FromJSON(rapidjson::Value& mapEntry)
 
     for (int i = 0; i < 2; ++i)
     {
-        // set default as apex values, set r2 later if needed
-        for (int j = 0; j < 8; ++j)
-            this->dxStates[i].blendStates[j] = MaterialBlendState_t(false, 0xf);
+        if (mapEntry.HasMember("blendStates"))
+        {
+            std::string blendStates = mapEntry["blendStates"].GetString();
+
+            std::istringstream iss(blendStates);
+            std::vector<DWORD> blendValues;
+
+            std::string token;
+            while (iss >> token) {
+                if (!token.empty()) {
+                    token = "0x" + token;
+                    std::stringstream stream(token);
+                    DWORD blend;
+                    stream >> std::hex >> blend;
+                    blendValues.push_back(blend);
+                }
+            }
+
+            if (blendValues.size() == 8) {
+                for (int j = 0; j < NUM_BLEND_STATES; ++j)
+                {
+                    DWORD blend = blendValues[j];
+
+                    int srcBlend = ((blend >> 2) & 0x1F) + 1;
+                    int destBlend = ((blend >> 7) & 0x1F) + 1;
+                    int blendOp = ((blend >> 12) & 7) + 1;
+                    int srcBlendAlpha = ((blend >> 15) & 0x1F) + 1;
+                    int destBlendAlpha = ((blend >> 20) & 0x1F) + 1;
+                    int blendOpAlpha = ((blend >> 25) & 7) + 1;
+                    int renderTargetWriteMask = (blend >> 28);
+
+                    this->dxStates[i].blendStates[j] = MaterialBlendState_t(((blend >> 1) & 1), D3D11_BLEND_NAMES[srcBlend], D3D11_BLEND_NAMES[destBlend], D3D11_BLEND_OP_NAMES[blendOp], D3D11_BLEND_NAMES[srcBlendAlpha], D3D11_BLEND_NAMES[destBlendAlpha], D3D11_BLEND_OP_NAMES[blendOpAlpha], renderTargetWriteMask);
+                }
+            }
+            else
+            {
+                Error("Error: Expected 8 blend values, but found %zu\n", blendValues.size());
+                for (int j = 0; j < 8; ++j)
+                {
+                    this->dxStates[i].blendStates[j] = MaterialBlendState_t(false, 0xf);
+
+                }
+            }
+        }
+        else
+        {
+            for (int j = 0; j < 8; ++j)
+            {
+                this->dxStates[i].blendStates[j] = MaterialBlendState_t(false, 0xf);
+            }
+        }
 
         this->dxStates[i].unk = unkFlags;
         this->dxStates[i].depthStencilFlags = depthStencilFlags;
@@ -586,6 +668,10 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
     //////////////////////////////////////////
     /// cpu
     std::string cpuPath = pak->GetAssetPath() + JSON_GET_STR(mapEntry, "cpuPath", sAssetPath + "_" + matlAsset->materialTypeStr + ".cpu");
+    if (mapEntry.HasMember("cpu") && mapEntry["cpu"].IsString())
+    {
+        cpuPath = pak->GetAssetPath() + mapEntry["cpu"].GetStdString() + ".cpu";
+    }
 
     /* SETUP DX SHADER BUF */
     GenericShaderBuffer genericShaderBuf{};
