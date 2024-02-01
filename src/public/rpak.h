@@ -27,6 +27,8 @@
 #define TYPE_MATL	MAKE_FOURCC('m', 'a', 't', 'l') // matl
 #define TYPE_ASEQ	MAKE_FOURCC('a', 's', 'e', 'q') // aseq
 #define TYPE_ARIG	MAKE_FOURCC('a', 'r', 'i', 'g') // arig
+#define TYPE_SHDR	MAKE_FOURCC('r', 'd', 'h', 's') // 
+#define TYPE_SHDS	MAKE_FOURCC('s', 'd', 'h', 's') // arig
 
 enum class AssetType : uint32_t
 {
@@ -38,6 +40,8 @@ enum class AssetType : uint32_t
 	MATL = TYPE_MATL, // material
 	ASEQ = TYPE_ASEQ, // animation sequence
 	ARIG = TYPE_ARIG, // animation rig
+	SHDR = TYPE_SHDR,
+	SHDS = TYPE_SHDS,
 };
 
 #pragma pack(push, 1)
