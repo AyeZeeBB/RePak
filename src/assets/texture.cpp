@@ -3,7 +3,8 @@
 #include "utils/dxutils.h"
 #include "public/texture.h"
 
-void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntries, const char* assetPath, bool forceDisableStreaming, bool suppressDuplicateWarning)
+// materialGeneratedTexture - whether this texture's creation was invoked by material automatic texture generation
+void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntries, const char* assetPath, bool forceDisableStreaming, bool materialGeneratedTexture)
 {
     Log("Adding txtr asset '%s'\n", assetPath);
 
@@ -13,7 +14,7 @@ void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
         // if the caller has requested that this warning is not emitted
         // this should only really be from material textures or ui image atlases
         // as those assets may unavoidably reuse a texture, causing an unresolvable warning here
-        if (!suppressDuplicateWarning)
+        if (!materialGeneratedTexture)
             Warning("Tried to add texture asset '%s' twice. Skipping redefinition...\n", assetPath);
 
         return;
@@ -22,7 +23,15 @@ void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
     std::string filePath = pak->GetAssetPath() + assetPath + ".dds";
 
     if (!FILE_EXISTS(filePath))
-        Error("Failed to find texture source file %s. Exiting...\n", filePath.c_str());
+    {
+        if(!materialGeneratedTexture)
+            Error("Failed to find texture source file %s. Exiting...\n", filePath.c_str());
+        else
+        {
+            Warning("Failed to find texture source file '%s'. Skipping automatic creation of this texture.\n");
+            return;
+        }
+    }
 
     CPakDataChunk hdrChunk = pak->CreateDataChunk(sizeof(TextureAssetHeader_t), SF_HEAD, 8);
 
@@ -100,11 +109,11 @@ void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
         for (unsigned int mipLevel = 0; mipLevel < ddsh.dwMipMapCount; mipLevel++)
         {
             // subtracts 1 so skip mips w/h at 1, gets added back when setting in mipLevel_t
-            int mipWidth = 0;
+            uint16_t mipWidth = 0;
             if (hdr->width >> mipLevel > 1)
                 mipWidth = (hdr->width >> mipLevel) - 1;
 
-            int mipHeight = 0;
+            uint16_t mipHeight = 0;
             if (hdr->height >> mipLevel > 1)
                 mipHeight = (hdr->height >> mipLevel) - 1;
             
@@ -116,7 +125,8 @@ void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
             
             size_t slicePitch = x * bppWidth * bppHeight;
 
-            mipLevel_t mipMap{ mipOffset, slicePitch, IALIGN16(slicePitch), mipWidth + 1, mipHeight + 1, mipLevel + 1 };
+            mipLevel_t mipMap{ mipOffset, slicePitch, IALIGN16(slicePitch),
+                static_cast<uint16_t>(mipWidth + 1), static_cast<uint16_t>(mipHeight + 1), static_cast<uint8_t>(mipLevel + 1) };
 
             hdr->dataSize += IALIGN16(slicePitch); // all mips are aligned to 16 bytes within rpak/starpak
             mipOffset += slicePitch; // add size for the next mip's offset
@@ -176,7 +186,7 @@ void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
     char* pCurrentPosStreamed = streamedbuf;
     char* pCurrentPosStreamedOpt = optstreamedbuf;
 
-    uint8_t mipLevel = mips.size();
+    uint8_t mipLevel = static_cast<uint8_t>(mips.size());
 
     while (mipLevel > 0)
     {
@@ -212,7 +222,7 @@ void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
     PakAsset_t asset;
 
     // this should hopefully fix some crashing
-    uint64_t starpakOffset = -1;
+    uint64_t starpakOffset = UINT64_MAX;
 
     if (isStreamable && hdr->streamedMipLevels > 0)
     {
@@ -226,8 +236,10 @@ void Assets::AddTextureAsset(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
         // do stuff
     }
 
-    asset.InitAsset(sAssetName + ".rpak", hdrChunk.GetPointer(), hdrChunk.GetSize(), dataChunk.GetPointer(), starpakOffset, -1, (std::uint32_t)AssetType::TXTR);
+
+    asset.InitAsset(sAssetName + ".rpak", hdrChunk.GetPointer(), hdrChunk.GetSize(), dataChunk.GetPointer(), starpakOffset, UINT64_MAX, AssetType::TXTR);
     asset.SetHeaderPointer(hdrChunk.Data());
+
     asset.version = TXTR_VERSION;
 
     asset.pageEnd = pak->GetNumPages();
