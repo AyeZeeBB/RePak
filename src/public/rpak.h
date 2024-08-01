@@ -29,8 +29,8 @@
 #define TYPE_MATL	MAKE_FOURCC('m', 'a', 't', 'l') // matl
 #define TYPE_ASEQ	MAKE_FOURCC('a', 's', 'e', 'q') // aseq
 #define TYPE_ARIG	MAKE_FOURCC('a', 'r', 'i', 'g') // arig
-#define TYPE_SHDR	MAKE_FOURCC('r', 'd', 'h', 's') // 
-#define TYPE_SHDS	MAKE_FOURCC('s', 'd', 'h', 's') // arig
+#define TYPE_SHDS	MAKE_FOURCC('s', 'h', 'd', 's') // shds
+#define TYPE_SHDR	MAKE_FOURCC('s', 'h', 'd', 'r') // shdr
 
 enum class AssetType : uint32_t
 {
@@ -44,8 +44,8 @@ enum class AssetType : uint32_t
 	MATL = TYPE_MATL, // material
 	ASEQ = TYPE_ASEQ, // animation sequence
 	ARIG = TYPE_ARIG, // animation rig
-	SHDR = TYPE_SHDR,
-	SHDS = TYPE_SHDS,
+	SHDS = TYPE_SHDS, // shaderset
+	SHDR = TYPE_SHDR, // shader
 };
 
 #pragma pack(push, 1)
@@ -244,12 +244,24 @@ public:
 
 	void* header;
 
+	// Extra information about the asset that is made available to other assets when being created.
+	std::shared_ptr<void> _publicData;
+
 	// vector of indexes for local assets that use this asset
 	std::vector<unsigned int> _relations{};
 
 	std::vector<PakGuidRefHdr_t> _guids{};
 
 	FORCEINLINE void SetHeaderPointer(void* pHeader) { this->header = pHeader; };
+
+	template <typename T>
+	inline void SetPublicData(T* const data)
+	{
+		std::shared_ptr<T> ptr(data);
+		_publicData = std::move(ptr);
+	}
+
+	char* const PublicData() { return reinterpret_cast<char*>(_publicData.get()); };
 
 	FORCEINLINE void AddRelation(unsigned int idx) { _relations.push_back({ idx }); };
 	FORCEINLINE void AddRelation(size_t idx) { _relations.push_back({ static_cast<unsigned int>(idx) }); };
@@ -261,27 +273,6 @@ public:
 		for (auto& it : *descs)
 			_guids.push_back(it);
 	};
-
-	// ensures that this asset's guid does not already exist within a given vector of assets
-	inline void EnsureUnique(std::vector<PakAsset_t>* assets)
-	{
-		size_t i = 0;
-		for (PakAsset_t& asset : *assets)
-		{
-			// this check requires a fatal error as by the time this is checked (just before being added to the vector)
-			// all of this asset's pages have already been created and dependencies have been processed
-			// if we simply skip the asset this late, it will cause problems with unused pages and invalid dependencies
-			// 
-			// additionally, a duplicate asset will usually be a mistake that the user wishes to deal with by themselves, and a non-fatal error
-			// may cause them to overlook the problem.
-			// assets in which duplicate additions are expected (e.g. textures being auto-added from materials) already handle non-fatal duplications separately
-			// from an earlier point at which asset skips are acceptable
-			if (asset.guid == this->guid)
-				Error("Found duplicate asset '%s'. Assets at index %lld and %lld have the same GUID (%llX). Exiting...\n", this->name.c_str(), i, assets->size(), this->guid);
-
-			i++;
-		}
-	}
 
 	FORCEINLINE bool IsType(uint32_t type)
 	{

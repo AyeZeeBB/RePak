@@ -56,10 +56,6 @@ private:
 	int flags;
 	int alignment; // required memory alignment for all data in this page
 
-	// [rexx]: not a fan of this anymore. might be better to have a vector of CPakDataChunk instances to avoid
-	//         duplicating data
-	//std::vector<char> data; // buffer for this page's data
-
 	std::vector<CPakDataChunk> chunks;
 
 	int dataSize;
@@ -83,24 +79,33 @@ class CPakDataChunk
 public:
 	CPakDataChunk() = default;
 
-	CPakDataChunk(size_t size, uint8_t alignment, char* data) : size((int)size), alignment(alignment), pData(data) {};
-	CPakDataChunk(int pageIndex, int pageOffset, size_t size, uint8_t alignment, char* data) : pageIndex(pageIndex), pageOffset(pageOffset), size((int)size), alignment(alignment), pData(data) {};
+	CPakDataChunk(size_t size, uint8_t alignment, char* data) : size((int)size), alignment(alignment), pData(data), released(false) {};
+	CPakDataChunk(int pageIndex, int pageOffset, size_t size, uint8_t alignment, char* data) : pageIndex(pageIndex), pageOffset(pageOffset), size((int)size), alignment(alignment), pData(data), released(false) {};
 
 private:
 	int pageIndex;
 	int pageOffset;
 	int size;
-	uint8_t alignment;
 
 	char* pData;
-
+	uint8_t alignment;
+	bool released;
 public:
 
 	inline PagePtr_t GetPointer(size_t offset=0) { return { pageIndex, static_cast<int>(pageOffset + offset) }; };
 
-	int GetIndex() { return pageIndex; };
-	char* Data() { return pData; };
-	int GetSize() { return size; };
+	inline int GetIndex() const { return pageIndex; };
+	inline char* Data() { return pData; };
+	inline int GetSize() const { return size; };
+	inline bool IsReleased() const { return released; };
+
+	inline void Release()
+	{
+		delete[] pData;
+		
+		this->pData = nullptr;
+		this->released = true;
+	}
 };
 
 class CPakFile
@@ -115,14 +120,27 @@ public:
 	// assets
 	//----------------------------------------------------------------------------
 
-	typedef void(*AssetTypeFunc_t)(CPakFile*, std::vector<PakAsset_t>*, const char*, rapidjson::Value&);
+	typedef void(*AssetTypeFunc_t)(CPakFile*, const char*, rapidjson::Value&);
 
 	void AddJSONAsset(const char* type, rapidjson::Value& file, AssetTypeFunc_t func_r2 = nullptr, AssetTypeFunc_t func_r5 = nullptr);
 	void AddAsset(rapidjson::Value& file);
 	void AddPointer(PagePtr_t ptr);
 	void AddPointer(int pageIdx, int pageOffset);
-	void AddGuidDescriptor(std::vector<PakGuidRefHdr_t>* guids, PagePtr_t ptr);
+	void AddGuidDescriptor(std::vector<PakGuidRefHdr_t>* guids, const PagePtr_t& ptr);
 	void AddGuidDescriptor(std::vector<PakGuidRefHdr_t>* guids, int idx, int offset);
+
+	FORCEINLINE void AddDependentToAsset(PakAsset_t* dependency, size_t dependentAssetIndex)
+	{
+		if(dependency)
+			dependency->AddRelation(dependentAssetIndex);
+	}
+
+	// Assumes that the function is being called for the currently processing asset
+	// Records the currently processing asset as a dependent asset for the provided dependency asset
+	FORCEINLINE void SetCurrentAssetAsDependentForAsset(PakAsset_t* dependency)
+	{
+		AddDependentToAsset(dependency, m_Assets.size());
+	}
 
 	void AddStarpakReference(const std::string& path);
 	void AddOptStarpakReference(const std::string& path);
@@ -208,6 +226,27 @@ public:
 	CPakVSegment& FindOrCreateSegment(int flags, int alignment);
 
 	PakAsset_t* GetAssetByGuid(uint64_t guid, uint32_t* idx = nullptr, bool silent = false);
+
+	FORCEINLINE void RequireUniqueAssetGUID(const PakAsset_t& asset)
+	{
+		uint32_t assetIdx = UINT32_MAX;
+		PakAsset_t* match = GetAssetByGuid(asset.guid, &assetIdx, true);
+		if (match != nullptr)
+		{
+			Error("Attempted to create asset with a non-unique GUID."
+				"\nAssets at index %u (%s) and %u (%s) have the same GUID (%llx).\n",
+				assetIdx, match->name.c_str(),
+				static_cast<uint32_t>(m_Assets.size()), asset.name.c_str(),
+				asset.guid
+			);
+		}
+	}
+
+	FORCEINLINE void PushAsset(const PakAsset_t& asset)
+	{
+		RequireUniqueAssetGUID(asset);
+		m_Assets.push_back(asset);
+	};
 
 	void BuildFromMap(const string& mapPath);
 
