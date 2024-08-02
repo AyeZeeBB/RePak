@@ -191,7 +191,7 @@ void MaterialAsset_t::FromJSON(rapidjson::Value& mapEntry)
                     int blendOpAlpha = ((blend >> 25) & 7) + 1;
                     int renderTargetWriteMask = (blend >> 28);
 
-                    this->dxStates[i].blendStates[j] = MaterialBlendState_t(((blend >> 1) & 1), D3D11_BLEND_NAMES[srcBlend], D3D11_BLEND_NAMES[destBlend], D3D11_BLEND_OP_NAMES[blendOp], D3D11_BLEND_NAMES[srcBlendAlpha], D3D11_BLEND_NAMES[destBlendAlpha], D3D11_BLEND_OP_NAMES[blendOpAlpha], renderTargetWriteMask);
+                    this->dxStates[i].blendStates[j] = MaterialBlendState_t(((blend >> 1) & 1), D3D11_BLEND_NAMES[srcBlend], D3D11_BLEND_NAMES[destBlend], D3D11_BLEND_OP_NAMES[blendOp], D3D11_BLEND_NAMES[srcBlendAlpha], D3D11_BLEND_NAMES[destBlendAlpha], D3D11_BLEND_OP_NAMES[blendOpAlpha], char(renderTargetWriteMask));
                 }
             }
             else
