@@ -30,7 +30,7 @@ void CPakFile::AddJSONAsset(const char* type, rapidjson::Value& file, AssetTypeF
 		}
 
 		if (targetFunc)
-			targetFunc(this, &m_Assets, file["path"].GetString(), file);
+			targetFunc(this, file["path"].GetString(), file);
 		else
 			Warning("Asset type '%s' is not supported on RPak version %i\n", type, fileVersion);
 	}
@@ -49,8 +49,10 @@ void CPakFile::AddAsset(rapidjson::Value& file)
 	AddJSONAsset("rmdl", file, nullptr, Assets::AddModelAsset_v9);
 	AddJSONAsset("aseq", file, nullptr, Assets::AddAnimSeqAsset_v7);
 	AddJSONAsset("arig", file, nullptr, Assets::AddAnimRigAsset_v4);
-	AddJSONAsset("shds", file, Assets::AddShaderSetAsset_stub, Assets::AddShaderSetAsset_v11);
-	AddJSONAsset("shdr", file, Assets::AddShaderSetAsset_stub, Assets::AddShaderAsset_v12);
+
+	AddJSONAsset("shds", file, Assets::AddShaderSetAsset_v8, nullptr);
+	AddJSONAsset("shdr", file, Assets::AddShaderAsset_v8, nullptr);
+
 }
 
 //-----------------------------------------------------------------------------
@@ -74,7 +76,7 @@ void CPakFile::AddGuidDescriptor(std::vector<PakGuidRefHdr_t>* guids, int idx, i
 	guids->push_back({ idx, offset });
 }
 
-void CPakFile::AddGuidDescriptor(std::vector<PakGuidRefHdr_t>* guids, PagePtr_t ptr)
+void CPakFile::AddGuidDescriptor(std::vector<PakGuidRefHdr_t>* guids, const PagePtr_t& ptr)
 {
 	guids->push_back(ptr);
 }

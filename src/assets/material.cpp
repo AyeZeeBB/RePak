@@ -38,7 +38,7 @@ const int BITS_PER_BLEND_STATE = 5;
 
 #undef GetObject
 // we need to take better account of textures once asset caching becomes a thing
-void Material_CreateTextures(CPakFile* pak, std::vector<PakAsset_t>* assetEntries, rapidjson::Value& mapEntry)
+void Material_CreateTextures(CPakFile* pak, rapidjson::Value& mapEntry)
 {
     if (JSON_IS_ARRAY(mapEntry, "textures"))
     {
@@ -54,7 +54,7 @@ void Material_CreateTextures(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
             if (RTech::ParseGUIDFromString(it.GetString()))
                 continue;
 
-            Assets::AddTextureAsset(pak, assetEntries, it.GetString(), JSON_GET_BOOL(mapEntry, "disableStreaming"), true);
+            Assets::AddTextureAsset(pak, it.GetString(), JSON_GET_BOOL(mapEntry, "disableStreaming"), true);
         }
     }
     else if (JSON_IS_OBJECT(mapEntry, "textures"))
@@ -71,7 +71,7 @@ void Material_CreateTextures(CPakFile* pak, std::vector<PakAsset_t>* assetEntrie
             if (RTech::ParseGUIDFromString(it.value.GetString()))
                 continue;
 
-            Assets::AddTextureAsset(pak, assetEntries, it.value.GetString(), JSON_GET_BOOL(mapEntry, "disableStreaming"), true);
+            Assets::AddTextureAsset(pak, it.value.GetString(), JSON_GET_BOOL(mapEntry, "disableStreaming"), true);
         }
     }
 
@@ -364,9 +364,9 @@ size_t Material_GetHighestTextureBindPoint(rapidjson::Value& mapEntry)
     return max;
 }
 
-size_t Material_AddTextures(CPakFile* pak, std::vector<PakAsset_t>* assetEntries, rapidjson::Value& mapEntry)
+size_t Material_AddTextures(CPakFile* pak, rapidjson::Value& mapEntry)
 {
-    Material_CreateTextures(pak, assetEntries, mapEntry);
+    Material_CreateTextures(pak, mapEntry);
 
     size_t textureCount = 0;
     if (JSON_IS_ARRAY(mapEntry, "textures"))
@@ -458,13 +458,13 @@ void Material_SetTitanfall2Preset(MaterialAsset_t* material, const std::string& 
 }
 
 // VERSION 7
-void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetEntries, const char* assetPath, rapidjson::Value& mapEntry)
+void Assets::AddMaterialAsset_v12(CPakFile* pak, const char* assetPath, rapidjson::Value& mapEntry)
 {
     Log("Adding matl asset '%s'\n", assetPath);
 
     std::string sAssetPath = std::string(assetPath); // hate this var name, love that it is different for every asset
 
-    size_t textureCount = Material_AddTextures(pak, assetEntries, mapEntry);
+    size_t textureCount = Material_AddTextures(pak, mapEntry);
 
     MaterialAsset_t* matlAsset = new MaterialAsset_t{};
     matlAsset->assetVersion = 12; // set asset as a titanfall 2 material
@@ -557,7 +557,7 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
                 PakAsset_t* txtrAsset = pak->GetAssetByGuid(textureGuid, nullptr);
 
                 if (txtrAsset)
-                    txtrAsset->AddRelation(assetEntries->size());
+                    pak->SetCurrentAssetAsDependentForAsset(txtrAsset);
                 else
                 {
                     externalDependencyCount++; // if the asset doesn't exist in the pak it has to be external, or missing
@@ -589,7 +589,7 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
                 PakAsset_t* txtrAsset = pak->GetAssetByGuid(textureGuid, nullptr);
 
                 if (txtrAsset)
-                    txtrAsset->AddRelation(assetEntries->size());
+                    pak->SetCurrentAssetAsDependentForAsset(txtrAsset);
                 else
                 {
                     externalDependencyCount++; // if the asset doesn't exist in the pak it has to be external, or missing
@@ -651,7 +651,7 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
             PakAsset_t* asset = pak->GetAssetByGuid(guid, nullptr, true);
 
             if (asset)
-                asset->AddRelation(assetEntries->size());
+                pak->SetCurrentAssetAsDependentForAsset(asset);
             else
                 externalDependencyCount++;
         }
@@ -665,7 +665,7 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
         PakAsset_t* asset = pak->GetAssetByGuid(matlAsset->colpassMaterial, nullptr, true);
 
         if (asset)
-            asset->AddRelation(assetEntries->size());
+            pak->SetCurrentAssetAsDependentForAsset(asset);
         else
             externalDependencyCount++;
     }
@@ -678,7 +678,7 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
         PakAsset_t* asset = pak->GetAssetByGuid(matlAsset->shaderSet, nullptr, true);
 
         if (asset)
-            asset->AddRelation(assetEntries->size());
+            pak->SetCurrentAssetAsDependentForAsset(asset);
         else
             externalDependencyCount++;
     }
@@ -742,8 +742,7 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
   
     asset.AddGuids(&guids);
 
-    asset.EnsureUnique(assetEntries);
-    assetEntries->push_back(asset);
+    pak->PushAsset(asset);
 
     Log("\n");
 
@@ -751,13 +750,13 @@ void Assets::AddMaterialAsset_v12(CPakFile* pak, std::vector<PakAsset_t>* assetE
 }
 
 // VERSION 8
-void Assets::AddMaterialAsset_v15(CPakFile* pak, std::vector<PakAsset_t>* assetEntries, const char* assetPath, rapidjson::Value& mapEntry)
+void Assets::AddMaterialAsset_v15(CPakFile* pak, const char* assetPath, rapidjson::Value& mapEntry)
 {
     Log("Adding matl asset '%s'\n", assetPath);
 
     std::string sAssetPath = std::string(assetPath); // hate this var name, love that it is different for every asset
 
-    size_t textureCount = Material_AddTextures(pak, assetEntries, mapEntry);
+    size_t textureCount = Material_AddTextures(pak, mapEntry);
 
     MaterialAsset_t* matlAsset = new MaterialAsset_t{};
     matlAsset->assetVersion = 15;
@@ -807,7 +806,7 @@ void Assets::AddMaterialAsset_v15(CPakFile* pak, std::vector<PakAsset_t>* assetE
                 PakAsset_t* txtrAsset = pak->GetAssetByGuid(textureGuid, nullptr);
 
                 if (txtrAsset)
-                    txtrAsset->AddRelation(assetEntries->size());
+                    pak->SetCurrentAssetAsDependentForAsset(txtrAsset);
                 else
                 {
                     externalDependencyCount++; // if the asset doesn't exist in the pak it has to be external, or missing
@@ -836,7 +835,7 @@ void Assets::AddMaterialAsset_v15(CPakFile* pak, std::vector<PakAsset_t>* assetE
                 PakAsset_t* txtrAsset = pak->GetAssetByGuid(textureGuid, nullptr);
 
                 if (txtrAsset)
-                    txtrAsset->AddRelation(assetEntries->size());
+                    pak->SetCurrentAssetAsDependentForAsset(txtrAsset);
                 else
                 {
                     externalDependencyCount++; // if the asset doesn't exist in the pak it has to be external, or missing
@@ -903,7 +902,7 @@ void Assets::AddMaterialAsset_v15(CPakFile* pak, std::vector<PakAsset_t>* assetE
             PakAsset_t* asset = pak->GetAssetByGuid(guid, nullptr, true);
 
             if (asset)
-                asset->AddRelation(assetEntries->size());
+                pak->SetCurrentAssetAsDependentForAsset(asset);
             else
                 externalDependencyCount++;
         }
@@ -917,7 +916,7 @@ void Assets::AddMaterialAsset_v15(CPakFile* pak, std::vector<PakAsset_t>* assetE
         PakAsset_t* asset = pak->GetAssetByGuid(matlAsset->colpassMaterial, nullptr, true);
 
         if (asset)
-            asset->AddRelation(assetEntries->size());
+            pak->SetCurrentAssetAsDependentForAsset(asset);
         else
             externalDependencyCount++;
     }
@@ -983,12 +982,14 @@ void Assets::AddMaterialAsset_v15(CPakFile* pak, std::vector<PakAsset_t>* assetE
     asset.version = 15;
 
     asset.pageEnd = pak->GetNumPages();
-    asset.remainingDependencyCount = static_cast<short>((guids.size() - externalDependencyCount) + 1); // plus one for the asset itself (I think)
+    //asset.remainingDependencyCount = static_cast<short>((guids.size() - externalDependencyCount) + 1); // plus one for the asset itself (I think)
+
+    // HACKHACK: i don't really understand what the value of this needs to be, so i have set this back to a (very) incorrect value that at least doesn't crash
+    asset.remainingDependencyCount = static_cast<short>((0i16 - externalDependencyCount) + 1);
 
     asset.AddGuids(&guids);
 
-    asset.EnsureUnique(assetEntries);
-    assetEntries->push_back(asset);
+    pak->PushAsset(asset);
 
     Log("\n");
 
