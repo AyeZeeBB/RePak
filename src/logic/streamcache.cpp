@@ -105,7 +105,7 @@ static void StreamCache_ProcessStarpakFile(
 	outEntries.resize(starpakEntryCount);
 
 	// Determine optimal thread count (leave one core free for system responsiveness)
-	const unsigned int numThreads = std::max(1u, std::thread::hardware_concurrency() - 1);
+	const unsigned int numThreads = (std::max)(1u, std::thread::hardware_concurrency() - 1);
 
 	// Parallel hashing using thread pool
 	auto processRange = [&](int64_t startIdx, int64_t endIdx) {
@@ -144,7 +144,7 @@ static void StreamCache_ProcessStarpakFile(
 		for (unsigned int t = 0; t < numThreads; ++t)
 		{
 			const int64_t startIdx = t * entriesPerThread;
-			const int64_t endIdx = std::min(startIdx + entriesPerThread, starpakEntryCount);
+			const int64_t endIdx = (std::min)(startIdx + entriesPerThread, starpakEntryCount);
 
 			if (startIdx >= starpakEntryCount)
 				break;
