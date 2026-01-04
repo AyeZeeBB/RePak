@@ -6,7 +6,11 @@
 #include <pch.h>
 #include <public/starpak.h>
 #include <utils/utils.h>
+#include <utils/memmap.h>
 #include <fstream>
+#include <thread>
+#include <mutex>
+#include <atomic>
 
 #include <utils/MurmurHash3.h>
 #include "streamcache.h"
@@ -58,6 +62,107 @@ static std::vector<StreamCacheFileEntry_s> StreamCache_GetStarpakFilesFromDirect
 	return paths;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: processes a single starpak file using memory mapping + parallel hashing
+//-----------------------------------------------------------------------------
+static void StreamCache_ProcessStarpakFile(
+	const StreamCacheFileEntry_s& foundEntry,
+	const int64_t pathIndex,
+	std::vector<StreamCacheDataEntry_s>& outEntries)
+{
+	const std::string& starpakPath = foundEntry.streamFilePath;
+
+	// Use memory-mapped file for zero-copy access
+	CMemoryMappedFile mappedFile;
+	if (!mappedFile.Open(starpakPath.c_str()))
+	{
+		Error("Failed to memory-map streaming file \"%s\" for reading.\n", starpakPath.c_str());
+		return;
+	}
+
+	const char* const mappedData = mappedFile.GetData();
+	const size_t starpakFileSize = mappedFile.GetSize();
+
+	// Validate header
+	const PakStreamSetFileHeader_s* starpakFileHeader = reinterpret_cast<const PakStreamSetFileHeader_s*>(mappedData);
+
+	if (starpakFileHeader->magic != STARPAK_MAGIC)
+	{
+		Error("Streaming file \"%s\" has an invalid file magic; expected %x, got %x.\n", 
+			starpakPath.c_str(), STARPAK_MAGIC, starpakFileHeader->magic);
+		return;
+	}
+
+	// Read entry count from end of file
+	const int64_t starpakEntryCount = *reinterpret_cast<const int64_t*>(mappedData + starpakFileSize - sizeof(int64_t));
+	const size_t starpakEntryHeadersSize = sizeof(PakStreamSetAssetEntry_s) * starpakEntryCount;
+
+	// Get pointer to entry headers (located before the entry count at end of file)
+	const PakStreamSetAssetEntry_s* starpakEntryHeaders = reinterpret_cast<const PakStreamSetAssetEntry_s*>(
+		mappedData + starpakFileSize - (sizeof(int64_t) + starpakEntryHeadersSize));
+
+	// Pre-allocate output entries
+	outEntries.resize(starpakEntryCount);
+
+	// Determine optimal thread count (leave one core free for system responsiveness)
+	const unsigned int numThreads = std::max(1u, std::thread::hardware_concurrency() - 1);
+
+	// Parallel hashing using thread pool
+	auto processRange = [&](int64_t startIdx, int64_t endIdx) {
+		for (int64_t i = startIdx; i < endIdx; ++i)
+		{
+			const PakStreamSetAssetEntry_s* entryHeader = &starpakEntryHeaders[i];
+
+			if (entryHeader->size == 0) [[unlikely]]
+				Error("Stream entry #%lld has a size of 0; streaming file appears corrupt.\n", i);
+			
+			if (entryHeader->offset < STARPAK_DATABLOCK_ALIGNMENT) [[unlikely]]
+				Error("Stream entry #%lld has an offset lower than %d; streaming file appears corrupt.\n", i, STARPAK_DATABLOCK_ALIGNMENT);
+
+			// Direct pointer access to mapped memory - no allocation, no copying!
+			const void* entryData = mappedData + entryHeader->offset;
+
+			StreamCacheDataEntry_s& cacheEntry = outEntries[i];
+			cacheEntry.dataOffset = entryHeader->offset;
+			cacheEntry.pathIndex = pathIndex;
+			cacheEntry.dataSize = entryHeader->size;
+
+			// Hash directly from mapped memory
+			assert(entryHeader->size < INT32_MAX);
+			MurmurHash3_x64_128(entryData, static_cast<size_t>(entryHeader->size), MURMUR_SEED, &cacheEntry.hash);
+		}
+	};
+
+	// Split work across threads
+	if (starpakEntryCount > 0 && numThreads > 1)
+	{
+		std::vector<std::thread> threads;
+		threads.reserve(numThreads);
+
+		const int64_t entriesPerThread = (starpakEntryCount + numThreads - 1) / numThreads;
+
+		for (unsigned int t = 0; t < numThreads; ++t)
+		{
+			const int64_t startIdx = t * entriesPerThread;
+			const int64_t endIdx = std::min(startIdx + entriesPerThread, starpakEntryCount);
+
+			if (startIdx >= starpakEntryCount)
+				break;
+
+			threads.emplace_back(processRange, startIdx, endIdx);
+		}
+
+		// Wait for all threads to complete
+		for (auto& thread : threads)
+			thread.join();
+	}
+	else
+	{
+		// Single-threaded fallback for small files or single-core systems
+		processRange(0, starpakEntryCount);
+	}
+}
+
 void CStreamCache::BuildMapFromGamePaks(const char* const streamCacheFile)
 {
 	std::string directoryPath(streamCacheFile);
@@ -75,43 +180,17 @@ void CStreamCache::BuildMapFromGamePaks(const char* const streamCacheFile)
 
 	// Start a timer for the cache builder process so that the user is notified when the tool finishes.
 	TIME_SCOPE("StreamCacheBuilder");
+
+	// Reserve approximate space to reduce reallocations
+	m_dataEntries.reserve(foundStarpakPaths.size() * 1000); // Estimate ~1000 entries per starpak
+
 	size_t starpakIndex = 0;
 
 	for (const StreamCacheFileEntry_s& foundEntry : foundStarpakPaths)
 	{
 		const std::string& starpakPath = foundEntry.streamFilePath;
 
-		BinaryIO starpakStream;
-
-		if (!starpakStream.Open(starpakPath, BinaryIO::Mode_e::Read))
-		{
-			Error("Failed to open streaming file \"%s\" for reading.\n", starpakPath.c_str());
-			continue;
-		}
-
-		PakStreamSetFileHeader_s starpakFileHeader = starpakStream.Read<PakStreamSetFileHeader_s>();
-
-		if (starpakFileHeader.magic != STARPAK_MAGIC)
-		{
-			Error("Streaming file \"%s\" has an invalid file magic; expected %x, got %x.\n", starpakPath.c_str(), STARPAK_MAGIC, starpakFileHeader.magic);
-			continue;
-		}
-
 		Log("Adding streaming file \"%s\" (%zu/%zu) to the cache.\n", starpakPath.c_str(), starpakIndex + 1, foundStarpakPaths.size());
-
-		const size_t starpakFileSize = fs::file_size(starpakPath);
-
-		starpakStream.Seek(starpakFileSize - sizeof(int64_t), std::ios::beg);
-
-		// get the number of data entries in this starpak file
-		const int64_t starpakEntryCount = starpakStream.Read<int64_t>();
-		const size_t starpakEntryHeadersSize = sizeof(PakStreamSetAssetEntry_s) * starpakEntryCount;
-
-		std::unique_ptr<PakStreamSetAssetEntry_s> starpakEntryHeaders = std::unique_ptr<PakStreamSetAssetEntry_s>(new PakStreamSetAssetEntry_s[starpakEntryCount]);
-
-		// go to the start of the entry structs
-		starpakStream.Seek(starpakFileSize - (8 + starpakEntryHeadersSize), std::ios::beg);
-		starpakStream.Read(reinterpret_cast<char*>(starpakEntryHeaders.get()), starpakEntryHeadersSize);
 
 		const char* starpakFileName = strrchr(starpakPath.c_str(), '\\');
 
@@ -125,33 +204,12 @@ void CStreamCache::BuildMapFromGamePaks(const char* const streamCacheFile)
 
 		const int64_t pathIndex = AddStarpakPathToCache(relativeStarpakPath, foundEntry.isOptional);
 
-		for (int64_t i = 0; i < starpakEntryCount; ++i)
-		{
-			const PakStreamSetAssetEntry_s* entryHeader = &starpakEntryHeaders.get()[i];
+		// Process this starpak with memory mapping + parallel hashing
+		std::vector<StreamCacheDataEntry_s> starpakEntries;
+		StreamCache_ProcessStarpakFile(foundEntry, pathIndex, starpakEntries);
 
-			if (entryHeader->size == 0) [[unlikely]] // not possible
-				Error("Stream entry #%lld has a size of 0; streaming file appears corrupt.\n", i);
-			
-			if (entryHeader->offset < STARPAK_DATABLOCK_ALIGNMENT) [[unlikely]] // also not possible
-				Error("Stream entry #%lld has an offset lower than %d; streaming file appears corrupt.\n", i, STARPAK_DATABLOCK_ALIGNMENT);
-
-			char* const entryData = reinterpret_cast<char*>(_aligned_malloc(entryHeader->size, 8));
-
-			starpakStream.Seek(entryHeader->offset, std::ios::beg);
-			starpakStream.Read(entryData, entryHeader->size);
-
-			StreamCacheDataEntry_s& cacheEntry = m_dataEntries.emplace_back();
-
-			cacheEntry.dataOffset = entryHeader->offset;
-			cacheEntry.pathIndex = pathIndex;
-			cacheEntry.dataSize = entryHeader->size;
-
-			// ideally we don't have entries over 2gb.
-			assert(entryHeader->size < INT32_MAX);
-
-			MurmurHash3_x64_128(entryData, static_cast<size_t>(entryHeader->size), MURMUR_SEED, &cacheEntry.hash);
-			_aligned_free(entryData);
-		}
+		// Append results to main cache
+		m_dataEntries.insert(m_dataEntries.end(), starpakEntries.begin(), starpakEntries.end());
 
 		starpakIndex++;
 	}

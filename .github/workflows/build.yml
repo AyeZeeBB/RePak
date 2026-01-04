@@ -1,5 +1,6 @@
 name: CI
-on: [push, pull_request]
+on: 
+  workflow_dispatch:  # Allows manual trigger from GitHub Actions tab
 
 env:
   BUILD_PROFILE: Release

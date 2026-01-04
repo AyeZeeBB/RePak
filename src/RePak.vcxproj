@@ -161,6 +161,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="utils\binaryio.cpp" />
+    <ClCompile Include="utils\memmap.cpp" />
     <ClCompile Include="utils\dxutils.cpp" />
     <ClCompile Include="utils\jsonutils.cpp" />
     <ClCompile Include="utils\logger.cpp" />
@@ -285,6 +286,7 @@
     <ClInclude Include="thirdparty\zstd\zstd.h" />
     <ClInclude Include="thirdparty\zstd\zstd_errors.h" />
     <ClInclude Include="utils\binaryio.h" />
+    <ClInclude Include="utils\memmap.h" />
     <ClInclude Include="utils\dxutils.h" />
     <ClInclude Include="utils\jsonutils.h" />
     <ClInclude Include="utils\logger.h" />
