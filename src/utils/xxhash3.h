@@ -1,20 +1,20 @@
 //=============================================================================//
 //
-// xxHash3 wrapper - enables XXH3 from the zstd-bundled xxhash
+// xxHash3 wrapper for RePak
 //
-// This header must be included BEFORE any other xxhash includes to properly
-// configure XXH3 support. The zstd bundled xxhash disables XXH3 by default.
+// Provides access to XXH3_128bits from the zstd-bundled xxhash.
+// The zstd copy uses ZSTD_ namespace prefix, so we provide aliases.
 //
 //=============================================================================//
 #pragma once
 
-// Undefine the ZSTD restrictions before including xxhash
-#ifdef XXH_NO_XXH3
-#undef XXH_NO_XXH3
-#endif
-
-// Use inline implementation for maximum performance
-#define XXH_INLINE_ALL
-
-// Include the full xxhash implementation
 #include <thirdparty/zstd/common/xxhash.h>
+
+// The zstd-bundled xxhash uses ZSTD_ namespace prefix
+// Create convenience aliases to the namespaced versions
+using XXH128_hash_t = ZSTD_XXH128_hash_t;
+
+inline XXH128_hash_t XXH3_128bits_withSeed(const void* data, size_t len, unsigned long long seed)
+{
+    return ZSTD_XXH3_128bits_withSeed(data, len, seed);
+}

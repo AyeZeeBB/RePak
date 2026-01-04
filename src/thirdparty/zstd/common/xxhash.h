@@ -10,10 +10,7 @@
  */
 
 /* Local adaptations for Zstandard */
-
-#ifndef XXH_NO_XXH3
-# define XXH_NO_XXH3
-#endif
+/* XXH3 is enabled for RePak stream cache hashing */
 
 #ifndef XXH_NAMESPACE
 # define XXH_NAMESPACE ZSTD_
